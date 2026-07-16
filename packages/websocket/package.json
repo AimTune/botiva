@@ -1,0 +1,29 @@
+{
+    "name": "@botiva/websocket",
+    "version": "0.1.0",
+    "description": "botiva WebSocket transport connector (ws) — speaks Botiva Wire Protocol v1.",
+    "license": "MIT",
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "default": "./dist/index.js"
+        }
+    },
+    "files": ["dist"],
+    "sideEffects": false,
+    "publishConfig": { "access": "public" },
+    "dependencies": {
+        "@botiva/core": "workspace:^"
+    },
+    "peerDependencies": {
+        "ws": ">=8"
+    },
+    "devDependencies": {
+        "@types/ws": "^8.5.13",
+        "ws": "^8.21.0"
+    },
+    "engines": { "node": ">=18.17" }
+}

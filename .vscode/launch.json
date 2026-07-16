@@ -1,0 +1,133 @@
+{
+    // TS examples run via tsx (node --import tsx) but import the @botiva/*
+    // packages from their built dist, so every TS config builds first
+    // (preLaunchTask). Breakpoints work in examples/*.ts (tsx inline source
+    // maps) AND in packages/*/src (tsc sourceMap in dist).
+    //
+    // Port map: :8790 city-guide demo · :8791 MCP+middleware demo ·
+    //           :8792 LangGraph demo · :8793 Go demo server ·
+    //           :8794 shop MCP server (standalone)
+    //
+    // The Go / .NET configs need the Go and C# extensions respectively.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Smoke test (no key)",
+            "runtimeExecutable": "node",
+            "runtimeArgs": ["--import", "tsx"],
+            "program": "${workspaceFolder}/examples/smoke-test.ts",
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "pnpm build",
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "City-guide demo :8790 (needs key)",
+            "runtimeExecutable": "node",
+            "runtimeArgs": ["--import", "tsx"],
+            "program": "${workspaceFolder}/examples/demo-server.ts",
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "pnpm build",
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "MCP + middleware demo :8791 (needs key)",
+            "runtimeExecutable": "node",
+            "runtimeArgs": ["--import", "tsx"],
+            "program": "${workspaceFolder}/examples/mcp-demo-server.ts",
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "pnpm build",
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "MCP + middleware demo — selftest",
+            "runtimeExecutable": "node",
+            "runtimeArgs": ["--import", "tsx"],
+            "program": "${workspaceFolder}/examples/mcp-demo-server.ts",
+            "args": ["--selftest"],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "pnpm build",
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "LangGraph demo :8792 (needs key)",
+            "runtimeExecutable": "node",
+            "runtimeArgs": ["--import", "tsx"],
+            "program": "${workspaceFolder}/examples/langgraph-server.ts",
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "pnpm build",
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "LangGraph demo — selftest",
+            "runtimeExecutable": "node",
+            "runtimeArgs": ["--import", "tsx"],
+            "program": "${workspaceFolder}/examples/langgraph-server.ts",
+            "args": ["--selftest"],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "pnpm build",
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Shop MCP server :8794 (standalone, no key)",
+            "runtimeExecutable": "node",
+            "runtimeArgs": ["--import", "tsx"],
+            "program": "${workspaceFolder}/examples/mcp-server.ts",
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "pnpm build",
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
+        },
+        {
+            "type": "go",
+            "request": "launch",
+            "name": "Go demo server :8793 (no key)",
+            "mode": "auto",
+            "program": "${workspaceFolder}/ports/go/examples/server"
+        },
+        {
+            "type": "go",
+            "request": "launch",
+            "name": "Go port — tests",
+            "mode": "test",
+            "program": "${workspaceFolder}/ports/go/botiva"
+        },
+        {
+            "type": "coreclr",
+            "request": "launch",
+            "name": ".NET port — self-test",
+            "program": "${workspaceFolder}/ports/dotnet/Botiva.SelfTest/bin/Debug/net8.0/Botiva.SelfTest.dll",
+            "cwd": "${workspaceFolder}/ports/dotnet",
+            "preLaunchTask": "dotnet build (ports)",
+            "console": "integratedTerminal"
+        },
+        {
+            // For a server already started with: node --inspect --import tsx examples/<file>.ts
+            "type": "node",
+            "request": "attach",
+            "name": "Attach to running server (:9229)",
+            "port": 9229,
+            "cwd": "${workspaceFolder}",
+            "skipFiles": ["<node_internals>/**"]
+        }
+    ]
+}

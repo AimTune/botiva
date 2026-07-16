@@ -1,0 +1,7 @@
+packages:
+  - "packages/*"
+  - "examples"
+allowBuilds:
+  esbuild: true
+minimumReleaseAgeExclude:
+  - '@langchain/core@1.2.3'

@@ -1,0 +1,18 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "pnpm build",
+            "type": "shell",
+            "command": "pnpm build",
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": "$tsc"
+        },
+        {
+            "label": "dotnet build (ports)",
+            "type": "shell",
+            "command": "dotnet build ports/dotnet/Botiva.SelfTest",
+            "problemMatcher": "$msCompile"
+        }
+    ]
+}

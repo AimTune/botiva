@@ -1,0 +1,15 @@
+[project]
+name = "botiva"
+version = "0.1.0"
+description = "botiva — Python reference port of the botiva conversation framework (Botiva Wire Protocol v1)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["botiva", "chativa", "chatbot", "directline", "agent", "langgraph"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["botiva*"]

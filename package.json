@@ -1,0 +1,22 @@
+{
+    "name": "botiva-monorepo",
+    "private": true,
+    "type": "module",
+    "packageManager": "pnpm@11.5.2",
+    "scripts": {
+        "build": "tsc -b",
+        "clean": "tsc -b --clean",
+        "smoke": "pnpm build && tsx examples/smoke-test.ts",
+        "demo": "pnpm build && tsx examples/demo-server.ts",
+        "demo:graph": "pnpm build && tsx examples/langgraph-server.ts",
+        "demo:mcp": "pnpm build && tsx examples/mcp-demo-server.ts"
+    },
+    "devDependencies": {
+        "@types/node": "^22.10.0",
+        "tsx": "^4.19.2",
+        "typescript": "^5.7.2"
+    },
+    "engines": {
+        "node": ">=18.17"
+    }
+}

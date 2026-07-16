@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# .NET
+ports/dotnet/**/bin/
+ports/dotnet/**/obj/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/

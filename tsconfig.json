@@ -1,0 +1,10 @@
+{
+    "files": [],
+    "references": [
+        { "path": "packages/core" },
+        { "path": "packages/websocket" },
+        { "path": "packages/socketio" },
+        { "path": "packages/langgraph" },
+        { "path": "packages/redis" }
+    ]
+}

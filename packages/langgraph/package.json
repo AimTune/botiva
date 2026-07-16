@@ -1,0 +1,29 @@
+{
+    "name": "@botiva/langgraph",
+    "version": "0.1.0",
+    "description": "botiva Runtime adapter for LangGraph/LangChain — streamEvents, HITL interrupts, GenUI, tracing passthrough.",
+    "license": "MIT",
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "default": "./dist/index.js"
+        }
+    },
+    "files": ["dist"],
+    "sideEffects": false,
+    "publishConfig": { "access": "public" },
+    "dependencies": {
+        "@botiva/core": "workspace:^"
+    },
+    "peerDependencies": {
+        "@langchain/langgraph": ">=0.2"
+    },
+    "devDependencies": {
+        "@langchain/langgraph": "^1.4.7",
+        "@langchain/core": "^1.2.3"
+    },
+    "engines": { "node": ">=18.17" }
+}
