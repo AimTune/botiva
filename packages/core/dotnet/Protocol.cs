@@ -7,7 +7,7 @@ namespace Botiva;
 public sealed record IncomingMessage(string Text, string? Id = null, JsonObject? Meta = null);
 
 /// <summary>Client handshake.</summary>
-public sealed record HelloFrame(string? UserId, string? ConversationId, int? Watermark, JsonObject? Meta);
+public sealed record HelloFrame(string? UserId, string? ConversationId, int? Watermark, JsonObject? Meta, string? Token = null);
 
 /// <summary>ParseIncoming result — exactly one property is non-null.</summary>
 public sealed record Inbound(HelloFrame? Hello, IncomingMessage? Message);
@@ -22,6 +22,13 @@ public static class Protocol
 
     public static JsonNode? ToNode(object? value) =>
         value is null ? null : JsonSerializer.SerializeToNode(value, Json);
+
+    /// <summary>Build a transient `error` frame (auth rejection, protocol error).</summary>
+    public static Frame ErrorFrame(string code, string message) => new()
+    {
+        ["type"] = "error",
+        ["data"] = new JsonObject { ["code"] = code, ["message"] = message },
+    };
 
     /// <summary>
     /// Accepts a JSON string, a parsed JsonObject or plain text — mirrors
@@ -55,7 +62,8 @@ public static class Protocol
                 (string?)value["userId"],
                 (string?)value["conversationId"],
                 value["watermark"] is JsonNode w ? (int?)w.GetValue<double>() : null,
-                value["meta"] as JsonObject), null);
+                value["meta"] as JsonObject,
+                (string?)value["token"]), null);
         }
 
         var body = (string?)(value["data"]?["text"]) ?? (string?)value["text"] ?? "";

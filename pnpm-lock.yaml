@@ -20,6 +20,9 @@ importers:
 
   examples/ts:
     dependencies:
+      '@botiva/authentication':
+        specifier: workspace:^
+        version: link:../../packages/authentication/ts
       '@botiva/core':
         specifier: workspace:^
         version: link:../../packages/core/ts
@@ -63,7 +66,11 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
 
-  packages/authentication/ts: {}
+  packages/authentication/ts:
+    dependencies:
+      '@botiva/core':
+        specifier: workspace:^
+        version: link:../../core/ts
 
   packages/core/ts: {}
 

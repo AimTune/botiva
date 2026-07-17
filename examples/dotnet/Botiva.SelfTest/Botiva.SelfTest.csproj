@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\packages\core\dotnet\Botiva.csproj" />
+    <ProjectReference Include="..\..\..\packages\authentication\dotnet\Botiva.Authentication.csproj" />
   </ItemGroup>
 
 </Project>

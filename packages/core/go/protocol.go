@@ -26,6 +26,7 @@ type HelloFrame struct {
 	ConversationID string
 	Watermark      int
 	HasWatermark   bool
+	Token          string // auth credential (§2.1), when the server authenticates
 	Meta           map[string]any
 }
 
@@ -66,6 +67,7 @@ func ParseIncoming(raw any) *Inbound {
 			hello.Watermark = int(w)
 			hello.HasWatermark = true
 		}
+		hello.Token, _ = value["token"].(string)
 		hello.Meta, _ = value["meta"].(map[string]any)
 		return &Inbound{Hello: hello}
 	}

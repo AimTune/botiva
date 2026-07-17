@@ -70,9 +70,24 @@ public static class SelfTest
             await c.WaitFor(f => BotText(f, "Botivan"), "name recalled across conversations");
             Pass("UserStore across conversations (recall_name)");
 
+            // authentication over the wire (/chat-secure, PROTOCOL.md §2.1)
+            var secureUrl = $"ws://localhost:{port}/chat-secure";
+            var noAuth = await Client.ConnectAsync(secureUrl);
+            await noAuth.WaitFor(f => (string?)f["type"] == "error" && (string?)f["data"]?["code"] == "unauthorized",
+                "auth error frame");
+            Pass("unauthenticated connect → error frame (transport)");
+
+            var authed = await Client.ConnectAsync($"{secureUrl}?token=good-token&userId=user-spoof");
+            var authWelcome = await authed.WaitFor(f => (string?)f["type"] == "welcome", "welcome (auth)");
+            if ((string?)authWelcome["data"]?["userId"] != "user-verified")
+                throw new Exception("verified userId not applied by the transport");
+            Pass("valid token → verified userId overrides claim (transport)");
+
             a.Dispose();
             b.Dispose();
             c.Dispose();
+            noAuth.Dispose();
+            authed.Dispose();
             Console.WriteLine("\n.NET agent selftest passed ✅");
             return true;
         }

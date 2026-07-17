@@ -30,6 +30,7 @@ class Hello:
     user_id: str | None = None
     conversation_id: str | None = None
     watermark: int | None = None
+    token: str | None = None  # auth credential (§2.1), when the server authenticates
     meta: dict[str, Any] | None = None
 
 
@@ -58,6 +59,7 @@ def parse_incoming(raw: Any) -> Inbound | None:
             user_id=value.get("userId"),
             conversation_id=value.get("conversationId"),
             watermark=int(watermark) if watermark is not None else None,
+            token=value.get("token"),
             meta=value.get("meta"),
         ))
     data = value.get("data") if isinstance(value.get("data"), dict) else {}
@@ -69,6 +71,11 @@ def parse_incoming(raw: Any) -> Inbound | None:
         id=value.get("id") if isinstance(value.get("id"), str) else None,
         meta=value.get("meta") if isinstance(value.get("meta"), dict) else None,
     ))
+
+
+def error_frame(code: str, message: str) -> Frame:
+    """Build a transient ``error`` frame (auth rejection, protocol error)."""
+    return {"type": "error", "data": {"code": code, "message": message}}
 
 
 @dataclass

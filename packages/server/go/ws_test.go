@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
@@ -20,7 +21,12 @@ type testClient struct {
 
 func dialTest(t *testing.T, url string) *testClient {
 	t.Helper()
-	conn, err := Dial(url)
+	return dialTestHeaders(t, url, nil)
+}
+
+func dialTestHeaders(t *testing.T, url string, headers map[string]string) *testClient {
+	t.Helper()
+	conn, err := DialWithHeaders(url, headers)
 	if err != nil {
 		t.Fatalf("dial %s: %v", url, err)
 	}
@@ -165,4 +171,64 @@ func TestWebSocketTransportEndToEnd(t *testing.T) {
 	}
 	d.send("hello world")
 	d.waitFor("turn works after early ping", func(f botiva.Frame) bool { return botText(f, "Echo: hello world") })
+}
+
+// testAuth is an inline Authenticator: token "good" (query, Bearer header, or
+// the botiva_session cookie) → verified userId "user-verified"; anything else
+// is rejected. Exercises the transport wiring without the authentication module.
+type testAuth struct{}
+
+func (testAuth) Authenticate(_ context.Context, ac botiva.AuthContext) (botiva.AuthResult, error) {
+	token := ac.Token
+	if token == "" {
+		for _, pair := range strings.Split(ac.Headers["cookie"], ";") {
+			kv := strings.SplitN(strings.TrimSpace(pair), "=", 2)
+			if len(kv) == 2 && kv[0] == "botiva_session" {
+				token = kv[1]
+			}
+		}
+	}
+	if token == "good" {
+		return botiva.AuthResult{OK: true, UserID: "user-verified"}, nil
+	}
+	return botiva.AuthResult{OK: false, Reason: "invalid token"}, nil
+}
+
+func TestWebSocketAuthentication(t *testing.T) {
+	engine := botiva.NewConversationEngine(botiva.EngineOptions{
+		Runtime:       botiva.DemoRuntime{},
+		Authenticator: testAuth{},
+	})
+	server := httptest.NewServer(NewHandler(engine, &HandlerOptions{HelloTimeout: 30 * time.Millisecond}))
+	defer server.Close()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/chat"
+
+	// (a) rejected: no credential → error frame + close 4401, no welcome
+	bad := dialTest(t, wsURL)
+	errFrame := bad.waitFor("auth error frame", func(f botiva.Frame) bool { return f["type"] == "error" })
+	if data, _ := errFrame["data"].(map[string]any); data["code"] != "unauthorized" {
+		t.Fatalf("error frame = %v", errFrame["data"])
+	}
+	for f := range bad.frames { // drain until the socket closes
+		if f["type"] == "welcome" {
+			t.Fatal("rejected connection must not receive a welcome frame")
+		}
+	}
+	if code := bad.conn.CloseCode(); code != botiva.AuthCloseCode {
+		t.Fatalf("close code = %d, want %d", code, botiva.AuthCloseCode)
+	}
+
+	// (b) accepted via query token → verified userId overrides any claim
+	good := dialTest(t, wsURL+"?token=good&userId=user-spoof")
+	welcome := good.waitFor("welcome (auth)", func(f botiva.Frame) bool { return f["type"] == "welcome" })
+	if uid := welcome["data"].(map[string]any)["userId"]; uid != "user-verified" {
+		t.Fatalf("verified userId not applied: got %v", uid)
+	}
+
+	// (c) accepted via cookie header (browser-style, no client token plumbing)
+	cookie := dialTestHeaders(t, wsURL, map[string]string{"Cookie": "botiva_session=good"})
+	welcomeCookie := cookie.waitFor("welcome (cookie)", func(f botiva.Frame) bool { return f["type"] == "welcome" })
+	if uid := welcomeCookie["data"].(map[string]any)["userId"]; uid != "user-verified" {
+		t.Fatalf("cookie credential not honored: got %v", uid)
+	}
 }

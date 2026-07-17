@@ -91,6 +91,46 @@ async def selftest(url: str) -> None:
     await c.close()
 
 
+async def auth_selftest(port: int) -> None:
+    """Authentication over the wire (PROTOCOL.md §2.1) on a second server."""
+    from botiva_auth import CookieAuthenticator, HmacJwtAuthenticator  # noqa: E402
+    from botiva_auth.selftest import _SECRET, _make_jwt  # noqa: E402 — reuse the HS256 signer
+
+    engine = ConversationEngine(
+        DemoRuntime(),
+        authenticator=CookieAuthenticator("botiva_session", HmacJwtAuthenticator(_SECRET)),
+    )
+    server = WebSocketServer(engine, port=port, hello_timeout=0.05)
+    await server.start()
+    url = f"ws://localhost:{port}/chat"
+    try:
+        # (a) rejected: no credential → error frame + close 4401, no welcome
+        bad = await Client.connect(url)
+        err = await bad.wait_for(lambda f: f.get("type") == "error", "auth error frame")
+        assert err["data"]["code"] == "unauthorized", err
+        await bad.wait_closed()
+        assert bad.close_code == 4401, f"close code {bad.close_code}"
+        assert not any(f.get("type") == "welcome" for f in bad.frames), "welcome sent to rejected client"
+        passed("unauthenticated connect → error frame + close 4401")
+
+        # (b) accepted via query token → verified userId overrides the claim
+        good = await Client.connect(f"{url}?token={_make_jwt('user-verified')}&userId=user-spoof")
+        w = await good.wait_for(lambda f: f.get("type") == "welcome", "welcome (auth)")
+        assert w["data"]["userId"] == "user-verified", w
+        passed("valid token → verified userId overrides claim")
+
+        # (c) accepted via cookie header (browser-style, no client token plumbing)
+        ck = await Client.connect(url, headers={"Cookie": f"botiva_session={_make_jwt('user-cookie')}"})
+        wc = await ck.wait_for(lambda f: f.get("type") == "welcome", "welcome (cookie)")
+        assert wc["data"]["userId"] == "user-cookie", wc
+        passed("cookie credential authenticates")
+
+        await good.close()
+        await ck.close()
+    finally:
+        await server.close()
+
+
 async def main() -> int:
     server = WebSocketServer(build_engine(), port=PORT)
     await server.start()
@@ -99,6 +139,7 @@ async def main() -> int:
     if "--selftest" in sys.argv:
         try:
             await selftest(f"ws://localhost:{PORT}/chat")
+            await auth_selftest(PORT + 1)
         except (TimeoutError, AssertionError, ConnectionError) as err:
             print(f"\nPython transport selftest failed ❌ {err}", file=sys.stderr)
             return 1

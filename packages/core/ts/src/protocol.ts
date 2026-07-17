@@ -23,6 +23,8 @@ export interface HelloFrame {
     conversationId?: string;
     /** Highest `seq` the client has already seen; server replays newer frames. */
     watermark?: number;
+    /** Credential for the Authenticator, when one is configured (PROTOCOL.md §2.1). */
+    token?: string;
     meta?: Record<string, unknown>;
 }
 
@@ -73,7 +75,25 @@ export interface RunFrame {
     data: { status: "started" | "finished" };
 }
 
-export type Frame = HelloFrame | WelcomeFrame | TextFrame | ToolCallFrame | GenUIFrame | RunFrame;
+/** Out-of-band error (e.g. auth rejection). Transient, never persisted. */
+export interface ErrorFrame {
+    type: "error";
+    data: { code: string; message: string };
+}
+
+export type Frame =
+    | HelloFrame
+    | WelcomeFrame
+    | TextFrame
+    | ToolCallFrame
+    | GenUIFrame
+    | RunFrame
+    | ErrorFrame;
+
+/** Build a transient `error` frame (auth rejection, protocol error, …). */
+export function errorFrame(code: string, message: string): ErrorFrame {
+    return { type: "error", data: { code, message } };
+}
 
 /** Frame types that get a `seq` and are replayed after reconnect. */
 export const PERSISTENT_FRAME_TYPES = ["text", "tool_call", "genui"] as const;

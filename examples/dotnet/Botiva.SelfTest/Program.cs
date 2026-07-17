@@ -1,8 +1,11 @@
 // botiva .NET port self-test — same scenario as the Go test / TS smoke test.
 // Run with: dotnet run --project Botiva.SelfTest
 
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Nodes;
 using Botiva;
+using Botiva.Authentication;
 
 var failures = 0;
 
@@ -81,6 +84,86 @@ Check("UserStore across conversations", Find(c, f => BotText(f, "Your name is Ha
 await connA.CloseAsync();
 await connB.CloseAsync();
 await connC.CloseAsync();
+
+// 8. authentication port (engine-level — the code path the transports drive)
+const string jwtSecret = "selftest-secret";
+string MakeJwt(string sub, JsonObject? extra = null)
+{
+    string Enc(JsonNode n) => Convert.ToBase64String(Encoding.UTF8.GetBytes(n.ToJsonString()))
+        .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    var head = Enc(new JsonObject { ["alg"] = "HS256", ["typ"] = "JWT" });
+    var claims = extra ?? new JsonObject();
+    claims["sub"] = sub;
+    var body = Enc(claims);
+    using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(jwtSecret));
+    var sig = Convert.ToBase64String(hmac.ComputeHash(Encoding.ASCII.GetBytes($"{head}.{body}")))
+        .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    return $"{head}.{body}.{sig}";
+}
+
+var authEngine = new ConversationEngine(new EngineOptions
+{
+    Runtime = new DemoRuntime(),
+    // Cookie "botiva_session" → JWT, with a query/hello/Bearer token fallback.
+    Authenticator = new CookieAuthenticator("botiva_session",
+        new HmacJwtAuthenticator(new HmacJwtOptions { Secret = jwtSecret })),
+});
+
+// (a) rejected: no credential → AuthenticationException
+var rejected = false;
+try
+{
+    await authEngine.ConnectAsync(new ConnectParams { Deliver = _ => { }, Auth = new AuthInput { Transport = "websocket" } });
+}
+catch (AuthenticationException ex)
+{
+    rejected = ex.Code == "unauthorized";
+}
+Check("unauthenticated connect throws AuthenticationException", rejected);
+
+// (b) accepted via token → verified userId overrides the client claim
+var authA = new List<Frame>();
+var goodConn = await authEngine.ConnectAsync(new ConnectParams
+{
+    UserId = "user-spoof",
+    Deliver = authA.Add,
+    Auth = new AuthInput { Transport = "websocket", Token = MakeJwt("user-verified", new JsonObject { ["role"] = "admin" }) },
+});
+Check("valid token → verified userId overrides claim", goodConn.UserId == "user-verified");
+var authWelcome = Find(authA, f => (string?)f["type"] == "welcome");
+Check("welcome carries the verified userId", (string?)authWelcome?["data"]?["userId"] == "user-verified");
+
+// (c) accepted via cookie (browser-style, no client token plumbing)
+var cookieConn = await authEngine.ConnectAsync(new ConnectParams
+{
+    Deliver = _ => { },
+    Auth = new AuthInput
+    {
+        Transport = "websocket",
+        Headers = new Dictionary<string, string> { ["cookie"] = $"botiva_session={MakeJwt("user-cookie")}" },
+    },
+});
+Check("cookie credential authenticates", cookieConn.UserId == "user-cookie");
+
+// (d) a forged token cannot spoof identity
+var forgedRejected = false;
+try
+{
+    await authEngine.ConnectAsync(new ConnectParams
+    {
+        UserId = "user-spoof",
+        Deliver = _ => { },
+        Auth = new AuthInput { Transport = "websocket", Token = "not-a-jwt" },
+    });
+}
+catch (AuthenticationException)
+{
+    forgedRejected = true;
+}
+Check("forged token cannot spoof identity", forgedRejected);
+
+await goodConn.CloseAsync();
+await cookieConn.CloseAsync();
 
 Console.WriteLine(failures == 0 ? "\nAll .NET port checks passed ✅" : $"\n{failures} check(s) failed ❌");
 return failures == 0 ? 0 : 1;

@@ -24,6 +24,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Awaitable, Callable, Protocol
 
+from .auth import AuthContext, AuthenticationError, AuthInput, Authenticator
 from .events import AgentEvent, busy as busy_event, genui, message, run_error
 from .protocol import (
     PROTOCOL_VERSION,
@@ -159,12 +160,14 @@ class ConversationEngine:
         history_store: HistoryStore | None = None,
         extensions: list[Any] | None = None,
         greeting: str | None = None,
+        authenticator: Authenticator | None = None,
     ) -> None:
         self.runtime = runtime
         self.store: StateStore = state_store or MemoryStateStore()
         self.history: HistoryStore = history_store or MemoryHistoryStore()
         self.extensions = extensions or []
         self.greeting = greeting
+        self.authenticator = authenticator
         self._live: dict[str, set[_LiveConnection]] = {}
         self._turn_locks: set[str] = set()
 
@@ -178,12 +181,40 @@ class ConversationEngine:
         conversation_id: str | None = None,
         watermark: int = 0,
         meta: dict[str, Any] | None = None,
+        auth: AuthInput | None = None,
     ) -> Connection:
-        conversation_id = conversation_id or _new_id("conv")
-        record, fresh = await self._load_record(conversation_id, user_id)
-        user_id = user_id or record["userId"]
+        # Authenticate before touching any state. A configured authenticator can
+        # reject the attempt (raises AuthenticationError → transports emit an
+        # `error` frame + close) or replace the client-asserted user_id with a
+        # verified one.
+        user_id_hint = user_id
+        auth_claims: dict[str, Any] | None = None
+        if self.authenticator is not None:
+            ctx = AuthContext(
+                transport=auth.transport if auth else "unknown",
+                token=auth.token if auth else None,
+                query=auth.query if auth else {},
+                headers=auth.headers if auth else {},
+                user_id=user_id,
+                conversation_id=conversation_id,
+            )
+            result = self.authenticator.authenticate(ctx)
+            if hasattr(result, "__await__"):
+                result = await result
+            if not result.ok:
+                raise AuthenticationError(result.reason or "unauthorized")
+            if result.user_id is not None:
+                user_id_hint = result.user_id
+            auth_claims = result.claims
 
-        live = _LiveConnection(_new_id("connection"), user_id, conversation_id, meta or {}, deliver)
+        conversation_id = conversation_id or _new_id("conv")
+        record, fresh = await self._load_record(conversation_id, user_id_hint)
+        user_id = user_id_hint or record["userId"]
+
+        conn_meta = dict(meta or {})
+        if auth_claims is not None:
+            conn_meta["auth"] = auth_claims
+        live = _LiveConnection(_new_id("connection"), user_id, conversation_id, conn_meta, deliver)
         self._live.setdefault(conversation_id, set()).add(live)
 
         ctx = self._context(conversation_id, user_id, live.meta)

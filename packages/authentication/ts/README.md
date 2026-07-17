@@ -1,20 +1,56 @@
 # @botiva/authentication
 
-**Status: skeleton — not wired into the engine or any transport yet.**
+Concrete `Authenticator` adapters for the `@botiva/core` auth port
+(PROTOCOL.md §2.1). The port itself (`Authenticator`, `AuthContext`,
+`AuthResult`, `AuthenticationError`, `AllowAllAuthenticator`) lives in
+`@botiva/core` — this package ships the reusable verifiers, the way
+`@botiva/redis` ships `StateStore` implementations.
 
-This package defines the botiva authentication port: the `Authenticator`
-interface (`authenticate(ctx) → AuthResult`), the `AuthContext` a transport
-hands it, and an `AllowAllAuthenticator` that preserves today's open-door
-behaviour.
+## Adapters
 
-Nothing calls it yet. botiva currently has no authentication anywhere:
-identity (`userId`, `conversationId`) is client-asserted, `engine.connect()`
-takes no credential, extensions cannot reject a connection, and PROTOCOL.md §2
-mandates accepting identity-less connections.
+| Adapter | Credential | Verifies |
+|---|---|---|
+| `StaticTokenAuthenticator` | `ctx.token` | a static `token → userId` map (API keys, fixtures) |
+| `HmacJwtAuthenticator` | `ctx.token` | HS256 JWT (`node:crypto`, zero deps): signature + `exp`/`nbf`, `sub` → userId, payload → claims |
+| `CookieAuthenticator` | a named cookie in `ctx.headers.cookie` | extracts the cookie, delegates to an inner authenticator |
 
-The full design — token transport (WS query / `hello` frame, Socket.IO
-handshake auth), an engine-level gate, a reject signal on the wire (error
-frame + close code), a PROTOCOL.md addendum, and parity implementations for
-the Go/.NET/Python ports — is tracked in
-[AimTune/botiva#1](https://github.com/AimTune/botiva/issues/1)
-(draft: [docs/issues/authentication.md](../../../docs/issues/authentication.md)).
+Composable: wrap any verifier in `CookieAuthenticator` for browser sessions.
+
+## Usage
+
+```ts
+import { ConversationEngine } from "@botiva/core";
+import { CookieAuthenticator, HmacJwtAuthenticator } from "@botiva/authentication";
+
+const engine = new ConversationEngine({
+    runtime,
+    authenticator: new CookieAuthenticator({
+        cookie: "botiva_session",
+        inner: new HmacJwtAuthenticator({ secret: process.env.JWT_SECRET! }),
+    }),
+});
+```
+
+The transports (`@botiva/websocket`, `@botiva/socket.io`) read the credential
+from `?token=`, the `hello` frame's `token`, an `Authorization: Bearer …`
+header, or (via `CookieAuthenticator`) the `Cookie` header, and translate a
+rejection into an `error` frame + close (WebSocket code 4401). A returned
+`userId` is the verified identity and overrides any client-asserted one.
+
+## Writing your own
+
+Implement the one-method port and pass it to the engine:
+
+```ts
+import type { Authenticator, AuthContext, AuthResult } from "@botiva/authentication";
+
+class MyAuthenticator implements Authenticator {
+    async authenticate(ctx: AuthContext): Promise<AuthResult> {
+        const userId = await lookup(ctx.token);
+        return userId ? { ok: true, userId } : { ok: false, reason: "denied" };
+    }
+}
+```
+
+Cross-language parity (Go/.NET/Python) is tracked in
+[AimTune/botiva#1](https://github.com/AimTune/botiva/issues/1).

@@ -1,7 +1,7 @@
 {
     "name": "@botiva/authentication",
     "version": "0.1.0",
-    "description": "botiva authentication port — Authenticator interface and shared auth types (skeleton).",
+    "description": "botiva authentication adapters — static-token, HMAC-JWT and cookie Authenticator implementations for the @botiva/core auth port.",
     "license": "MIT",
     "type": "module",
     "main": "./dist/index.js",
@@ -16,6 +16,9 @@
     "sideEffects": false,
     "publishConfig": {
         "access": "public"
+    },
+    "dependencies": {
+        "@botiva/core": "workspace:^"
     },
     "engines": {
         "node": ">=18.17"

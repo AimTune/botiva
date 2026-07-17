@@ -68,6 +68,9 @@ type ConnectParams struct {
 	// serializes its writes via an internal mutex).
 	Deliver func(Frame)
 	Meta    map[string]any
+	// Auth carries the credential + request material for the configured
+	// Authenticator (if any). Nil means "no credential supplied".
+	Auth *AuthInput
 }
 
 // Connection is the handle a transport holds for one attached client.
@@ -96,17 +99,22 @@ type EngineOptions struct {
 	Extensions   []Extension
 	Logger       *slog.Logger
 	Greeting     string
+	// Authenticator gates Connect(): rejects unauthorized attempts (returns an
+	// *AuthenticationError) or replaces the client-asserted UserID with a
+	// verified one. Nil = legacy open-door behaviour.
+	Authenticator Authenticator
 }
 
 // ConversationEngine — Go port of the botiva engine. Same responsibilities:
 // identity, watermark replay, per-conversation turn lock, HITL, fan-out.
 type ConversationEngine struct {
-	runtime    Runtime
-	store      StateStore
-	history    HistoryStore
-	extensions []Extension
-	log        *slog.Logger
-	greeting   string
+	runtime       Runtime
+	store         StateStore
+	history       HistoryStore
+	extensions    []Extension
+	log           *slog.Logger
+	greeting      string
+	authenticator Authenticator
 
 	mu        sync.Mutex
 	live      map[string]map[*liveConnection]struct{}
@@ -130,14 +138,15 @@ func NewConversationEngine(opts EngineOptions) *ConversationEngine {
 		logger = slog.Default()
 	}
 	return &ConversationEngine{
-		runtime:    opts.Runtime,
-		store:      store,
-		history:    history,
-		extensions: opts.Extensions,
-		log:        logger,
-		greeting:   opts.Greeting,
-		live:       map[string]map[*liveConnection]struct{}{},
-		turnLocks:  map[string]bool{},
+		runtime:       opts.Runtime,
+		store:         store,
+		history:       history,
+		extensions:    opts.Extensions,
+		log:           logger,
+		greeting:      opts.Greeting,
+		authenticator: opts.Authenticator,
+		live:          map[string]map[*liveConnection]struct{}{},
+		turnLocks:     map[string]bool{},
 	}
 }
 
@@ -152,24 +161,66 @@ func (e *ConversationEngine) Connect(ctx context.Context, params ConnectParams) 
 	if params.Deliver == nil {
 		panic("botiva: Connect requires a Deliver callback")
 	}
+
+	// Authenticate before touching any state. A configured authenticator can
+	// reject the attempt (returns *AuthenticationError → transports emit an
+	// `error` frame + close) or replace the client-asserted userID with a
+	// verified one.
+	userIDHint := params.UserID
+	var authClaims map[string]any
+	if e.authenticator != nil {
+		ac := AuthContext{UserID: params.UserID, ConversationID: params.ConversationID, Transport: "unknown"}
+		if params.Auth != nil {
+			ac.Token = params.Auth.Token
+			ac.Query = params.Auth.Query
+			ac.Headers = params.Auth.Headers
+			if params.Auth.Transport != "" {
+				ac.Transport = params.Auth.Transport
+			}
+		}
+		res, err := e.authenticator.Authenticate(ctx, ac)
+		if err != nil {
+			return nil, err
+		}
+		if !res.OK {
+			reason := res.Reason
+			if reason == "" {
+				reason = "unauthorized"
+			}
+			return nil, &AuthenticationError{Code: "unauthorized", Reason: reason}
+		}
+		if res.UserID != "" {
+			userIDHint = res.UserID
+		}
+		authClaims = res.Claims
+	}
+
 	conversationID := params.ConversationID
 	if conversationID == "" {
 		conversationID = newID("conv")
 	}
-	record, fresh, err := e.loadRecord(ctx, conversationID, params.UserID)
+	record, fresh, err := e.loadRecord(ctx, conversationID, userIDHint)
 	if err != nil {
 		return nil, err
 	}
-	userID := params.UserID
+	userID := userIDHint
 	if userID == "" {
 		userID = record.UserID
 	}
 
+	meta := params.Meta
+	if authClaims != nil {
+		meta = map[string]any{}
+		for k, v := range params.Meta {
+			meta[k] = v
+		}
+		meta["auth"] = authClaims
+	}
 	live := &liveConnection{
 		id:             newID("connection"),
 		userID:         userID,
 		conversationID: conversationID,
-		meta:           params.Meta,
+		meta:           meta,
 		deliver:        params.Deliver,
 	}
 	e.mu.Lock()

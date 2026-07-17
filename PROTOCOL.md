@@ -40,7 +40,39 @@ The frames are identical everywhere; only how `hello` data travels differs.
 | SSE + HTTP POST (future) | query/headers on the SSE request                                | SSE `data:` lines / POST body |
 
 A server MUST accept connections with no identity at all (fresh visitor) and
-generate ids.
+generate ids — **unless** an authenticator is configured (§2.1).
+
+## 2.1 Authentication (opt-in)
+
+By default identity is client-asserted and every connection is accepted (§2).
+A server MAY configure an **Authenticator** to gate `connect()`; this profile
+overrides the "accept anyone" rule above.
+
+**Credential transport** (a server reads the first that is present):
+
+| Transport | Credential in                                                            |
+|-----------|--------------------------------------------------------------------------|
+| WebSocket | `?token=` query param · `hello` frame `token` · `Authorization: Bearer …` header |
+| Socket.IO | `auth: { token }` · `?token=` query                                      |
+
+Request **headers are forwarded** to the authenticator, so a cookie-based
+verifier can read `Cookie` without any client-side token plumbing (browsers
+attach cookies automatically).
+
+**Verdict** — the authenticator returns `{ ok, userId?, claims?, reason? }`:
+
+* `ok: false` ⇒ the server MUST send a transient `error` frame
+  `{ "type": "error", "data": { "code": "unauthorized", "message": … } }` and
+  then close the connection — WebSocket with **close code 4401**, Socket.IO with
+  `disconnect(true)`. No `welcome` is sent.
+* `ok: true` ⇒ a returned `userId` is the **verified** identity and overrides
+  any client-asserted `userId` (so a valid token cannot be used to spoof a
+  different user); `claims` are exposed to the runtime as `TurnContext.meta.auth`.
+
+Authentication is connection-time only — no authorization/RBAC is implied.
+Reference adapters ship in `@botiva/authentication`
+(`StaticTokenAuthenticator`, `HmacJwtAuthenticator`, `CookieAuthenticator`);
+the port itself (`Authenticator`) lives in `@botiva/core` (§8).
 
 ## 3. Frame catalog
 
@@ -49,7 +81,7 @@ Persistence classes:
 * **persistent** — appended to conversation history with monotonic `seq`
   (1-based), replayed on reconnect: `text`, `tool_call`, `genui`.
 * **transient** — delivery-only, never replayed: `hello`, `welcome`, `run`,
-  and the busy notice.
+  `error`, and the busy notice.
 
 Clients and servers MUST ignore unknown frame types and unknown fields
 (forward compatibility).
@@ -58,7 +90,8 @@ Clients and servers MUST ignore unknown frame types and unknown fields
 
 ```jsonc
 // optional handshake (first frame, when not using query/auth)
-{ "type": "hello", "userId": "user-…", "conversationId": "conv-…", "watermark": 12, "meta": {} }
+// `token` is the auth credential (§2.1), only needed when the server authenticates
+{ "type": "hello", "userId": "user-…", "conversationId": "conv-…", "watermark": 12, "token": "…", "meta": {} }
 
 // user message
 { "type": "text", "id": "optional-client-id", "data": { "text": "hello" } }
@@ -92,6 +125,9 @@ Clients and servers MUST ignore unknown frame types and unknown fields
 // typing indicator (transient)
 { "type": "run", "data": { "status": "started" } }
 { "type": "run", "data": { "status": "finished" } }
+
+// out-of-band error (transient) — e.g. auth rejection; followed by a close (§2.1)
+{ "type": "error", "data": { "code": "unauthorized", "message": "invalid token" } }
 ```
 
 ## 4. Turn lifecycle
@@ -221,6 +257,26 @@ interface Extension {
 }
 ```
 
+### Authenticator (optional connect-time gate, §2.1)
+
+```ts
+interface Authenticator {
+    authenticate(ctx: AuthContext): AuthResult | Promise<AuthResult>;
+}
+interface AuthContext {
+    transport: string; token?: string;
+    query?: Record<string, string>; headers?: Record<string, string>;
+    userId?: string; conversationId?: string;   // client-asserted (unverified)
+}
+interface AuthResult { ok: boolean; userId?: string; claims?: Record<string, unknown>; reason?: string }
+```
+A rejecting authenticator makes `connect()` throw `AuthenticationError`, which
+the transport turns into an `error` frame + close (WS code `AUTH_CLOSE_CODE` =
+4401). The port lives in core; reference adapters in `@botiva/authentication`.
+(Go: `Authenticate(ctx, AuthContext) (AuthResult, error)`; C#:
+`Task<AuthResult> AuthenticateAsync(AuthContext)`; Python: `async def
+authenticate(self, ctx) -> AuthResult`.)
+
 ### Engine surface (transport adapters call exactly this)
 
 ```ts
@@ -228,6 +284,7 @@ class ConversationEngine {
     connect(params: {
         userId?, conversationId?, watermark?,
         deliver(frame: Frame): void, meta?,
+        auth?: { transport?, token?, query?, headers? },   // material for the Authenticator (§2.1)
     }): Promise<Connection>;
     handleMessage(conversationId, msg: IncomingMessage, opts?): Promise<void>;
     post(conversationId, event: AgentEvent): Promise<void>;   // proactive push

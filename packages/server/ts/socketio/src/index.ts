@@ -12,9 +12,20 @@
 //   socket.emit("botiva", { type: "text", data: { text: "hello" } });
 //
 // Identity comes from `socket.handshake.auth` (preferred) or query params.
+//
+// Authentication (PROTOCOL.md §2.1): when the engine has an authenticator, the
+// credential is read from `auth.token` (or `?token=`); handshake headers are
+// forwarded (so a CookieAuthenticator can read `Cookie`). A rejected attempt
+// gets an `error` frame followed by `socket.disconnect(true)`.
 
 import type { Server, Socket } from "socket.io";
-import type { ConversationEngine, Frame, HelloFrame } from "@botiva/core";
+import {
+    AuthenticationError,
+    errorFrame,
+    type ConversationEngine,
+    type Frame,
+    type HelloFrame,
+} from "@botiva/core";
 
 export interface SocketIOConnectorOptions {
     engine: ConversationEngine;
@@ -47,17 +58,52 @@ export class SocketIOConnector {
             typeof v === "string" && v.length > 0 ? v : undefined;
 
         const watermarkRaw = auth.watermark ?? str(query.watermark);
-        const connection = await this.engine.connect({
-            userId: (auth.userId as string | undefined) ?? str(query.userId),
-            conversationId: (auth.conversationId as string | undefined) ?? str(query.conversationId),
-            watermark: watermarkRaw !== undefined ? Number(watermarkRaw) : undefined,
-            meta: (auth.meta as Record<string, unknown> | undefined) ?? undefined,
-            deliver: (frame: Frame) => {
-                if (socket.connected) socket.emit(this.event, frame);
-            },
-        });
+        let connection: Awaited<ReturnType<ConversationEngine["connect"]>>;
+        try {
+            connection = await this.engine.connect({
+                userId: (auth.userId as string | undefined) ?? str(query.userId),
+                conversationId: (auth.conversationId as string | undefined) ?? str(query.conversationId),
+                watermark: watermarkRaw !== undefined ? Number(watermarkRaw) : undefined,
+                meta: (auth.meta as Record<string, unknown> | undefined) ?? undefined,
+                auth: {
+                    transport: "socket.io",
+                    token: (auth.token as string | undefined) ?? str(query.token),
+                    query: flattenQuery(query),
+                    headers: flattenHeaders(socket.handshake.headers),
+                },
+                deliver: (frame: Frame) => {
+                    if (socket.connected) socket.emit(this.event, frame);
+                },
+            });
+        } catch (err) {
+            if (err instanceof AuthenticationError) {
+                socket.emit(this.event, errorFrame(err.code, err.message));
+                socket.disconnect(true);
+                return;
+            }
+            throw err;
+        }
 
         socket.on(this.event, (payload: unknown) => void connection.receive(payload));
         socket.on("disconnect", () => void connection.close());
     }
+}
+
+/** socket.io handshake headers → a flat lower-cased string map. */
+function flattenHeaders(headers: Record<string, string | string[] | undefined>): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(headers)) {
+        if (value === undefined) continue;
+        out[key.toLowerCase()] = Array.isArray(value) ? value.join(", ") : value;
+    }
+    return out;
+}
+
+function flattenQuery(query: Record<string, string | string[] | undefined>): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(query)) {
+        if (value === undefined) continue;
+        out[key] = Array.isArray(value) ? (value[0] ?? "") : value;
+    }
+    return out;
 }

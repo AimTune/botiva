@@ -27,8 +27,9 @@ export type {
     ToolCallStatus,
 } from "./events.js";
 
-export { PROTOCOL_VERSION, PERSISTENT_FRAME_TYPES, eventToFrames, parseIncoming } from "./protocol.js";
+export { PROTOCOL_VERSION, PERSISTENT_FRAME_TYPES, eventToFrames, parseIncoming, errorFrame } from "./protocol.js";
 export type {
+    ErrorFrame,
     Frame,
     FrameMapping,
     GenUIFrame,
@@ -42,7 +43,10 @@ export type {
 } from "./protocol.js";
 
 export { ConversationEngine } from "./engine.js";
-export type { ConnectParams, Connection, EngineOptions } from "./engine.js";
+export type { AuthInput, ConnectParams, Connection, EngineOptions } from "./engine.js";
+
+export { AllowAllAuthenticator, AuthenticationError, AUTH_CLOSE_CODE } from "./auth.js";
+export type { AuthContext, AuthResult, Authenticator } from "./auth.js";
 
 export { ExtensionRegistry } from "./extensions.js";
 export type { ConnectionInfo, Extension } from "./extensions.js";

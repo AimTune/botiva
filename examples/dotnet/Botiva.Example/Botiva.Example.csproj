@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\packages\core\dotnet\Botiva.csproj" />
+    <ProjectReference Include="..\..\..\packages\authentication\dotnet\Botiva.Authentication.csproj" />
     <ProjectReference Include="..\..\..\packages\server\dotnet\Botiva.AspNetCore.csproj" />
     <ProjectReference Include="..\..\..\packages\runtimes\dotnet\Botiva.Agents.csproj" />
   </ItemGroup>

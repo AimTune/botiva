@@ -52,6 +52,7 @@ import type {
     TurnContext,
 } from "./runtime.js";
 import { runWithTurnContext } from "./emit.js";
+import { AuthenticationError, type Authenticator } from "./auth.js";
 
 /** Engine-internal per-conversation record (kept under "conv:{id}:botiva"). */
 interface ConversationRecord extends Record<string, unknown> {
@@ -68,6 +69,18 @@ interface LiveConnection {
     deliver(frame: Frame): void | Promise<void>;
 }
 
+/** Credential + request material a transport hands the Authenticator. */
+export interface AuthInput {
+    /** Transport name, e.g. "websocket" | "socket.io". */
+    transport?: string;
+    /** Credential presented by the client (query token, hello.token, Bearer header). */
+    token?: string;
+    /** Raw query parameters of the upgrade/handshake request. */
+    query?: Record<string, string>;
+    /** Raw request headers (lower-cased keys). */
+    headers?: Record<string, string>;
+}
+
 export interface ConnectParams {
     /** Stable user identity; generated (and returned in `welcome`) when omitted. */
     userId?: string;
@@ -78,6 +91,8 @@ export interface ConnectParams {
     /** Transport callback that writes one wire frame to this client. */
     deliver(frame: Frame): void | Promise<void>;
     meta?: Record<string, unknown>;
+    /** Credential + request material for the configured Authenticator (if any). */
+    auth?: AuthInput;
 }
 
 /** Handle a transport holds for one attached client. */
@@ -99,6 +114,12 @@ export interface EngineOptions {
     logger?: Logger;
     /** Sent as a persistent bot message when a conversation is first created. */
     greeting?: string;
+    /**
+     * Gates connect(): rejects unauthorized attempts (throws AuthenticationError)
+     * or replaces the client-asserted userId with a verified one. Omit for the
+     * legacy open-door behaviour.
+     */
+    authenticator?: Authenticator;
 }
 
 export class ConversationEngine {
@@ -108,6 +129,7 @@ export class ConversationEngine {
     readonly extensions: ExtensionRegistry;
     readonly log: Logger;
     #greeting?: string;
+    #authenticator?: Authenticator;
     #live = new Map<string, Set<LiveConnection>>();
     #turnLocks = new Set<string>();
 
@@ -121,6 +143,7 @@ export class ConversationEngine {
         this.extensions = new ExtensionRegistry(opts.extensions ?? []);
         this.log = opts.logger ?? console;
         this.#greeting = opts.greeting;
+        this.#authenticator = opts.authenticator;
     }
 
     // ── connection lifecycle (called by transport connectors) ───────────────
@@ -129,15 +152,38 @@ export class ConversationEngine {
         if (typeof params?.deliver !== "function") {
             throw new Error("connect() requires a deliver(frame) callback.");
         }
+
+        // Authenticate before touching any state. A configured authenticator can
+        // reject the attempt (throws AuthenticationError → transports emit an
+        // `error` frame + close) or replace the client-asserted userId with a
+        // verified one.
+        let userIdHint = params.userId;
+        let authClaims: Record<string, unknown> | undefined;
+        if (this.#authenticator) {
+            const result = await this.#authenticator.authenticate({
+                transport: params.auth?.transport ?? "unknown",
+                token: params.auth?.token,
+                query: params.auth?.query,
+                headers: params.auth?.headers,
+                userId: params.userId,
+                conversationId: params.conversationId,
+            });
+            if (!result.ok) {
+                throw new AuthenticationError(result.reason ?? "unauthorized");
+            }
+            if (result.userId !== undefined) userIdHint = result.userId;
+            authClaims = result.claims;
+        }
+
         const conversationId = params.conversationId ?? this.#id("conv");
-        const record = await this.#loadRecord(conversationId, params.userId);
-        const userId = params.userId ?? record.userId;
+        const record = await this.#loadRecord(conversationId, userIdHint);
+        const userId = userIdHint ?? record.userId;
 
         const live: LiveConnection = {
             id: this.#id("connection"),
             userId,
             conversationId,
-            meta: params.meta ?? {},
+            meta: authClaims ? { ...(params.meta ?? {}), auth: authClaims } : params.meta ?? {},
             deliver: params.deliver,
         };
         let set = this.#live.get(conversationId);

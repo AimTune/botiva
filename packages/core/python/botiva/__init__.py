@@ -13,6 +13,15 @@ Signatures mirror @botiva/core (see PROTOCOL.md §8):
 Ambient context (contextvars): botiva_emit(event) / botiva_context().
 """
 
+from .auth import (
+    AUTH_CLOSE_CODE,
+    AllowAllAuthenticator,
+    AuthContext,
+    AuthenticationError,
+    Authenticator,
+    AuthInput,
+    AuthResult,
+)
 from .engine import (
     Connection,
     ConversationEngine,
@@ -38,6 +47,7 @@ from .protocol import (
     PROTOCOL_VERSION,
     Frame,
     IncomingMessage,
+    error_frame,
     event_to_frames,
     parse_incoming,
 )
@@ -53,13 +63,15 @@ from .state import (
 from .demo import DemoRuntime
 
 __all__ = [
-    "AgentEvent", "Connection", "ConversationEngine", "ConversationStore",
+    "AUTH_CLOSE_CODE", "AgentEvent", "AllowAllAuthenticator", "AuthContext",
+    "AuthInput", "AuthResult", "AuthenticationError", "Authenticator",
+    "Connection", "ConversationEngine", "ConversationStore",
     "DemoRuntime", "Frame", "HistoryStore", "IncomingMessage",
     "MemoryHistoryStore", "MemoryStateStore", "PERSISTENT_FRAME_TYPES",
     "PROTOCOL_VERSION", "Runtime", "ScopedStore", "StateStore", "TurnContext",
-    "UserStore", "botiva_context", "botiva_emit", "busy", "event_to_frames",
-    "genui", "interrupt", "message", "parse_incoming", "run_error",
-    "run_finished", "run_started", "tool_call", "ui",
+    "UserStore", "botiva_context", "botiva_emit", "busy", "error_frame",
+    "event_to_frames", "genui", "interrupt", "message", "parse_incoming",
+    "run_error", "run_finished", "run_started", "tool_call", "ui",
 ]
 
 __version__ = "0.1.0"
