@@ -21,6 +21,7 @@ its capability: `packages/<capability>/<lang>` for library code and
 | Transcript/replay  | `HistoryStore`               | `HistoryStore`              | `IHistoryStore`               | `HistoryStore`              |
 | WebSocket transport | `@botiva/websocket`         | `…/server/ws` (stdlib)      | `Botiva.AspNetCore` (`app.MapBotiva`) | `botiva_ws` (stdlib asyncio) |
 | Agent adapter      | `@botiva/langgraph` (LangGraph) | `…/runtimes/langchaingo` (langchaingo) | `Botiva.Agents` (M.E.AI `IChatClient`) | `botiva_langgraph` (LangGraph) |
+| Auth adapters (§2.1) | `@botiva/authentication`  | `…/authentication` (module) | `Botiva.Authentication`       | `botiva_auth`               |
 | HITL inside a tool | LangGraph `interrupt()`      | `langchaingo.Interrupt(ctx, p)` | `Hitl.Interrupt(p)`       | LangGraph `interrupt()`     |
 
 Each port ships a `DemoRuntime` and a self-test that runs the exact same

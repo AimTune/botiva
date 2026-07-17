@@ -84,6 +84,8 @@ public sealed record ConnectParams
     public int Watermark { get; init; }
     public required Action<Frame> Deliver { get; init; }
     public JsonObject? Meta { get; init; }
+    /// <summary>Credential + request material for the configured authenticator (if any).</summary>
+    public AuthInput? Auth { get; init; }
 }
 
 public sealed record EngineOptions
@@ -93,6 +95,12 @@ public sealed record EngineOptions
     public IHistoryStore? HistoryStore { get; init; }
     public IReadOnlyList<Extension>? Extensions { get; init; }
     public string? Greeting { get; init; }
+    /// <summary>
+    /// Gates ConnectAsync(): rejects unauthorized attempts (throws
+    /// AuthenticationException) or replaces the client-asserted UserId with a
+    /// verified one. Null = legacy open-door behaviour.
+    /// </summary>
+    public IAuthenticator? Authenticator { get; init; }
 }
 
 /// <summary>
@@ -106,6 +114,7 @@ public sealed class ConversationEngine(EngineOptions options)
     private readonly IHistoryStore _history = options.HistoryStore ?? new MemoryHistoryStore();
     private readonly IReadOnlyList<Extension> _extensions = options.Extensions ?? [];
     private readonly string? _greeting = options.Greeting;
+    private readonly IAuthenticator? _authenticator = options.Authenticator;
 
     private readonly object _lock = new();
     private readonly Dictionary<string, HashSet<LiveConnection>> _live = [];
@@ -151,11 +160,39 @@ public sealed class ConversationEngine(EngineOptions options)
 
     public async Task<Connection> ConnectAsync(ConnectParams p, CancellationToken ct = default)
     {
-        var conversationId = p.ConversationId ?? NewId("conv");
-        var (record, fresh) = await LoadRecordAsync(conversationId, p.UserId, ct);
-        var userId = p.UserId ?? (string?)record["userId"] ?? NewId("user");
+        // Authenticate before touching any state. A configured authenticator can
+        // reject the attempt (throws AuthenticationException → transports emit an
+        // `error` frame + close) or replace the client-asserted userId with a
+        // verified one.
+        var userIdHint = p.UserId;
+        JsonObject? authClaims = null;
+        if (_authenticator is not null)
+        {
+            var result = await _authenticator.AuthenticateAsync(new AuthContext
+            {
+                Transport = p.Auth?.Transport ?? "unknown",
+                Token = p.Auth?.Token,
+                Query = p.Auth?.Query,
+                Headers = p.Auth?.Headers,
+                UserId = p.UserId,
+                ConversationId = p.ConversationId,
+            }, ct);
+            if (!result.Ok) throw new AuthenticationException(result.Reason ?? "unauthorized");
+            if (result.UserId is not null) userIdHint = result.UserId;
+            authClaims = result.Claims;
+        }
 
-        var live = new LiveConnection(NewId("connection"), userId, conversationId, p.Meta ?? new JsonObject(), p.Deliver);
+        var conversationId = p.ConversationId ?? NewId("conv");
+        var (record, fresh) = await LoadRecordAsync(conversationId, userIdHint, ct);
+        var userId = userIdHint ?? (string?)record["userId"] ?? NewId("user");
+
+        var meta = p.Meta ?? new JsonObject();
+        if (authClaims is not null)
+        {
+            meta = (JsonObject)meta.DeepClone();
+            meta["auth"] = (JsonObject)authClaims.DeepClone();
+        }
+        var live = new LiveConnection(NewId("connection"), userId, conversationId, meta, p.Deliver);
         lock (_lock)
         {
             if (!_live.TryGetValue(conversationId, out var set))

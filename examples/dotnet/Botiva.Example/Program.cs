@@ -25,6 +25,7 @@
 using Botiva;
 using Botiva.Agents;
 using Botiva.AspNetCore;
+using Botiva.Authentication;
 using Botiva.Example;
 using Botiva.Example.Agents;
 using Botiva.Example.Tools;
@@ -86,10 +87,19 @@ builder.Services.AddMcpServer()
     .WithHttpTransport(options => options.Stateless = true)
     .WithToolsFromAssembly(); // picks up [McpServerToolType] classes (Mcp/IterationMcpTools.cs)
 
+// A second, authenticated endpoint (PROTOCOL.md §2.1) — demonstrates the
+// transport rejecting/verifying credentials over the wire; --selftest checks it.
+var secureEngine = new ConversationEngine(new EngineOptions
+{
+    Runtime = new DemoRuntime(),
+    Authenticator = new StaticTokenAuthenticator(new Dictionary<string, string> { ["good-token"] = "user-verified" }),
+});
+
 var app = builder.Build();
 app.MapGet("/healthz", () => Results.Json(new { ok = true, engine = "botiva-dotnet-demo" }));
 app.MapMcp("/mcp");
 app.MapBotiva("/chat", engine);
+app.MapBotiva("/chat-secure", secureEngine);
 
 await app.StartAsync();
 await runtime.WarmUpAsync(); // connect the MCP client now that /mcp is live

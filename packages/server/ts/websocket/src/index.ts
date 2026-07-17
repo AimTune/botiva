@@ -1,10 +1,16 @@
 // WebSocketConnector — botiva transport adapter for `ws`.
 //
 // Identity handshake (either works):
-//   • Query params:  wss://host/chat?userId=u-1&conversationId=c-1&watermark=12
-//   • Hello frame:   first message {type:"hello", userId?, conversationId?, watermark?, meta?}
+//   • Query params:  wss://host/chat?userId=u-1&conversationId=c-1&watermark=12&token=…
+//   • Hello frame:   first message {type:"hello", userId?, conversationId?, watermark?, token?, meta?}
 // If neither arrives within `helloTimeoutMs`, a fresh identity is generated
 // and announced via the `welcome` frame (the client should persist it).
+//
+// Authentication (PROTOCOL.md §2.1): when the engine has an authenticator, the
+// credential is read from `?token=`, the hello frame's `token`, or an
+// `Authorization: Bearer …` header; request headers are forwarded too (so a
+// CookieAuthenticator can read `Cookie`). A rejected attempt gets an `error`
+// frame followed by a close with code AUTH_CLOSE_CODE (4401).
 //
 // The transport is intentionally thin: everything protocol-related (welcome,
 // replay, broadcast, turn handling) lives in the engine, so this file is the
@@ -13,7 +19,15 @@
 
 import type { IncomingMessage as HttpIncomingMessage, Server as HttpServer } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { Connection, ConversationEngine, Frame, HelloFrame } from "@botiva/core";
+import {
+    AuthenticationError,
+    AUTH_CLOSE_CODE,
+    errorFrame,
+    type Connection,
+    type ConversationEngine,
+    type Frame,
+    type HelloFrame,
+} from "@botiva/core";
 
 export interface WebSocketConnectorOptions {
     engine: ConversationEngine;
@@ -52,11 +66,13 @@ export class WebSocketConnector {
     async #onConnection(socket: WebSocket, req: HttpIncomingMessage): Promise<void> {
         const url = new URL(req.url ?? "/", "http://localhost");
         const q = url.searchParams;
+        const headers = flattenHeaders(req.headers);
         let hello: HelloFrame = {
             type: "hello",
             userId: q.get("userId") ?? undefined,
             conversationId: q.get("conversationId") ?? undefined,
             watermark: q.has("watermark") ? Number(q.get("watermark")) : undefined,
+            token: q.get("token") ?? bearer(headers) ?? undefined,
         };
 
         let connection: Connection | null = null;
@@ -106,15 +122,27 @@ export class WebSocketConnector {
         }
         if (socketClosed) return;
 
-        connection = await this.engine.connect({
-            userId: hello.userId,
-            conversationId: hello.conversationId,
-            watermark: hello.watermark,
-            meta: hello.meta,
-            deliver: (frame: Frame) => {
-                if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(frame));
-            },
-        });
+        try {
+            connection = await this.engine.connect({
+                userId: hello.userId,
+                conversationId: hello.conversationId,
+                watermark: hello.watermark,
+                meta: hello.meta,
+                auth: { transport: "websocket", token: hello.token, query: flattenQuery(q), headers },
+                deliver: (frame: Frame) => {
+                    if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(frame));
+                },
+            });
+        } catch (err) {
+            if (err instanceof AuthenticationError) {
+                if (socket.readyState === socket.OPEN) {
+                    socket.send(JSON.stringify(errorFrame(err.code, err.message)));
+                    socket.close(AUTH_CLOSE_CODE, err.message.slice(0, 120));
+                }
+                return;
+            }
+            throw err;
+        }
         if (socketClosed) {
             await connection.close();
             return;
@@ -134,4 +162,28 @@ function tryParseHello(text: string): HelloFrame | null {
     } catch {
         return null;
     }
+}
+
+/** Node http headers → a flat lower-cased string map (multi-values joined). */
+function flattenHeaders(headers: HttpIncomingMessage["headers"]): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(headers)) {
+        if (value === undefined) continue;
+        out[key.toLowerCase()] = Array.isArray(value) ? value.join(", ") : value;
+    }
+    return out;
+}
+
+function flattenQuery(q: URLSearchParams): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [key, value] of q.entries()) out[key] = value;
+    return out;
+}
+
+/** Pull a bearer token out of an `Authorization: Bearer …` header. */
+function bearer(headers: Record<string, string>): string | undefined {
+    const auth = headers["authorization"];
+    if (!auth) return undefined;
+    const match = /^Bearer\s+(.+)$/i.exec(auth.trim());
+    return match ? match[1] : undefined;
 }

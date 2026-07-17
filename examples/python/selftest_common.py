@@ -13,6 +13,7 @@ from typing import Any, Callable
 _ROOT = Path(__file__).resolve().parents[2]
 for _pkg in (
     "packages/runtimes/python",
+    "packages/authentication/python",
     "packages/server/python",
     "packages/core/python",
 ):
@@ -31,8 +32,12 @@ class Client:
         self._pump_task = asyncio.create_task(self._pump())
 
     @classmethod
-    async def connect(cls, url: str) -> "Client":
-        return cls(await WebSocketClient.connect(url))
+    async def connect(cls, url: str, headers: dict[str, Any] | None = None) -> "Client":
+        return cls(await WebSocketClient.connect(url, headers))
+
+    @property
+    def close_code(self) -> int:
+        return self._ws.close_code
 
     async def _pump(self) -> None:
         while True:
@@ -74,6 +79,10 @@ class Client:
                 await asyncio.wait_for(self._new_frame.wait(), remaining)
             except asyncio.TimeoutError as err:
                 raise TimeoutError(f"timeout: {label}") from err
+
+    async def wait_closed(self, timeout: float = 2.0) -> None:
+        """Block until the server closes the socket (the pump reads the close frame)."""
+        await asyncio.wait_for(asyncio.shield(self._pump_task), timeout)
 
     async def close(self) -> None:
         self._pump_task.cancel()

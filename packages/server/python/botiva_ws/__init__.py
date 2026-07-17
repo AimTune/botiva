@@ -34,8 +34,9 @@ import struct
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+from botiva.auth import AUTH_CLOSE_CODE, AuthInput, AuthenticationError
 from botiva.engine import ConversationEngine
-from botiva.protocol import Frame, parse_incoming
+from botiva.protocol import Frame, error_frame, parse_incoming
 
 logger = logging.getLogger("botiva_ws")
 
@@ -101,6 +102,7 @@ class _Socket:
         self._writer = writer
         self._client = client  # client frames are masked
         self._close_sent = False
+        self.close_code = 0  # status code from the peer's close frame, if any
         # Serialize write+drain: an out-of-turn engine.post() can deliver to the
         # same socket concurrently with in-turn dispatch, and two overlapping
         # drains on one StreamWriter trip asyncio's FlowControlMixin assertion.
@@ -129,6 +131,8 @@ class _Socket:
             elif opcode == OP_PONG:
                 pass
             elif opcode == OP_CLOSE:
+                if len(payload) >= 2:
+                    self.close_code = struct.unpack(">H", payload[:2])[0]
                 if not self._close_sent:
                     self._close_sent = True
                     self._writer.write(_encode_frame(OP_CLOSE, payload, self._client))
@@ -153,6 +157,19 @@ class _Socket:
         if not self._close_sent and not self._writer.is_closing():
             self._close_sent = True
             self._writer.write(_encode_frame(OP_CLOSE, b"", self._client))
+            try:
+                await self._writer.drain()
+            except (ConnectionError, OSError):
+                pass
+        self._writer.close()
+
+    async def close_with_code(self, code: int, reason: str = "") -> None:
+        """Send a close frame with an application status code + reason
+        (RFC 6455 §5.5.1), then close. Used for auth rejections (4401)."""
+        if not self._close_sent and not self._writer.is_closing():
+            self._close_sent = True
+            payload = struct.pack(">H", code) + reason.encode("utf-8")
+            self._writer.write(_encode_frame(OP_CLOSE, payload, self._client))
             try:
                 await self._writer.drain()
             except (ConnectionError, OSError):
@@ -252,6 +269,14 @@ class WebSocketServer:
         meta: dict[str, Any] | None = None
         buffered: str | None = None
 
+        # Auth credential (§2.1): ?token=, then Authorization: Bearer; a hello
+        # frame may still add one below. Headers are forwarded (cookie support).
+        token = q("token")
+        if token is None:
+            authz = headers.get("authorization", "")
+            if authz.lower().startswith("bearer "):
+                token = authz[7:].strip()
+
         # No identity in the URL → give the client a beat to send a hello frame.
         # Only the first byte is awaited under the timeout, so a frame that has
         # started arriving is always read to completion (no torn frames).
@@ -270,19 +295,32 @@ class WebSocketServer:
                     user_id, conversation_id, meta = hello.user_id, hello.conversation_id, hello.meta
                     if hello.watermark is not None:
                         watermark = hello.watermark
+                    if hello.token is not None:
+                        token = hello.token
                 else:
                     buffered = text  # first frame was a normal message → handle after connect
 
         def deliver(frame: Frame) -> Any:
             return socket.send_text(json.dumps(frame, ensure_ascii=False))
 
-        connection = await self.engine.connect(
-            deliver,
-            user_id=user_id,
-            conversation_id=conversation_id,
-            watermark=watermark,
-            meta=meta,
-        )
+        try:
+            connection = await self.engine.connect(
+                deliver,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                watermark=watermark,
+                meta=meta,
+                auth=AuthInput(
+                    transport="websocket",
+                    token=token,
+                    query={k: v[0] for k, v in query.items() if v},
+                    headers=headers,
+                ),
+            )
+        except AuthenticationError as err:
+            await socket.send_text(json.dumps(error_frame(err.code, err.reason)))
+            await socket.close_with_code(AUTH_CLOSE_CODE, err.reason)
+            return
         try:
             if buffered is not None:
                 await connection.receive(buffered)
@@ -333,7 +371,7 @@ class WebSocketClient:
         self._socket = socket
 
     @classmethod
-    async def connect(cls, url: str) -> "WebSocketClient":
+    async def connect(cls, url: str, headers: dict[str, str] | None = None) -> "WebSocketClient":
         parts = urlsplit(url)
         if parts.scheme != "ws":
             raise ValueError("only ws:// URLs are supported by this minimal client")
@@ -344,6 +382,7 @@ class WebSocketClient:
         target = parts.path or "/"
         if parts.query:
             target += "?" + parts.query
+        extra = "".join(f"{name}: {value}\r\n" for name, value in (headers or {}).items())
         writer.write(
             (
                 f"GET {target} HTTP/1.1\r\n"
@@ -351,7 +390,9 @@ class WebSocketClient:
                 "Upgrade: websocket\r\n"
                 "Connection: Upgrade\r\n"
                 f"Sec-WebSocket-Key: {key}\r\n"
-                "Sec-WebSocket-Version: 13\r\n\r\n"
+                "Sec-WebSocket-Version: 13\r\n"
+                f"{extra}"
+                "\r\n"
             ).encode()
         )
         await writer.drain()
@@ -376,6 +417,11 @@ class WebSocketClient:
 
     async def recv(self) -> str | None:
         return await self._socket.recv_text()
+
+    @property
+    def close_code(self) -> int:
+        """Status code from the server's close frame (0 if none seen yet)."""
+        return self._socket.close_code
 
     async def close(self) -> None:
         await self._socket.close()

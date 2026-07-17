@@ -64,6 +64,14 @@ public static class BotivaEndpointExtensions
         JsonObject? meta = null;
         string? buffered = null;
 
+        // Auth material (§2.1): headers (lower-cased, so a cookie verifier can
+        // read "cookie") + a credential from ?token= or Authorization: Bearer.
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var h in context.Request.Headers) headers[h.Key.ToLowerInvariant()] = h.Value.ToString();
+        var queryDict = new Dictionary<string, string>();
+        foreach (var kv in query) queryDict[kv.Key] = kv.Value.ToString();
+        string? token = query["token"].FirstOrDefault() ?? Bearer(headers);
+
         // No identity in the URL → give the client a beat to send a hello frame.
         // Cancelling a WebSocket receive aborts the socket, so the wait must
         // not cancel the read — if the timeout wins, the still-pending read
@@ -84,6 +92,7 @@ public static class BotivaEndpointExtensions
                     conversationId = hello.ConversationId;
                     if (hello.Watermark is { } w) watermark = w;
                     meta = hello.Meta;
+                    if (hello.Token is { } helloToken) token = helloToken;
                 }
                 else
                 {
@@ -120,16 +129,37 @@ public static class BotivaEndpointExtensions
             }
         }
 
-        var connection = await engine.ConnectAsync(new ConnectParams
+        ConversationEngine.Connection connection;
+        try
         {
-            UserId = userId,
-            ConversationId = conversationId,
-            Watermark = watermark,
-            Meta = meta,
-            // Fire-and-forget keeps the engine non-blocking; SemaphoreSlim's
-            // FIFO async waiters preserve frame order.
-            Deliver = frame => _ = SendAsync(frame.ToJsonString()),
-        }, aborted);
+            connection = await engine.ConnectAsync(new ConnectParams
+            {
+                UserId = userId,
+                ConversationId = conversationId,
+                Watermark = watermark,
+                Meta = meta,
+                Auth = new AuthInput
+                {
+                    Transport = "websocket",
+                    Token = token,
+                    Query = queryDict,
+                    Headers = headers,
+                },
+                // Fire-and-forget keeps the engine non-blocking; SemaphoreSlim's
+                // FIFO async waiters preserve frame order.
+                Deliver = frame => _ = SendAsync(frame.ToJsonString()),
+            }, aborted);
+        }
+        catch (AuthenticationException authEx)
+        {
+            await SendAsync(Protocol.ErrorFrame(authEx.Code, authEx.Reason).ToJsonString());
+            if (socket.State == WebSocketState.Open)
+            {
+                var reason = authEx.Reason.Length > 120 ? authEx.Reason[..120] : authEx.Reason;
+                await socket.CloseAsync((WebSocketCloseStatus)Auth.CloseCode, reason, CancellationToken.None);
+            }
+            return;
+        }
 
         try
         {
@@ -159,6 +189,13 @@ public static class BotivaEndpointExtensions
             await connection.CloseAsync();
         }
     }
+
+    /// <summary>Pull a token out of an `Authorization: Bearer …` header.</summary>
+    private static string? Bearer(IReadOnlyDictionary<string, string> headers) =>
+        headers.TryGetValue("authorization", out var auth) &&
+        auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+            ? auth["Bearer ".Length..].Trim()
+            : null;
 
     /// <summary>Guards against a hostile client streaming an unbounded message (matches Go/Python ports).</summary>
     private const int MaxMessageBytes = 16 << 20; // 16 MiB

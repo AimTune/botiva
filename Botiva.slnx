@@ -5,6 +5,10 @@
     <Project Path="examples/dotnet/Botiva.SelfTest/Botiva.SelfTest.csproj" />
   </Folder>
   <Folder Name="/packages/" />
+  <Folder Name="/packages/authentication/" />
+  <Folder Name="/packages/authentication/dotnet/">
+    <Project Path="packages/authentication/dotnet/Botiva.Authentication.csproj" />
+  </Folder>
   <Folder Name="/packages/core/" />
   <Folder Name="/packages/core/dotnet/">
     <Project Path="packages/core/dotnet/Botiva.csproj" />

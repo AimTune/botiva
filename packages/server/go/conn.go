@@ -42,6 +42,7 @@ type Conn struct {
 	closeOnce sync.Once
 	closeSent bool
 	closeErr  error
+	closeCode uint16 // status code received in the peer's close frame, if any
 }
 
 func newConn(netConn net.Conn, br *bufio.Reader, client bool) *Conn {
@@ -81,6 +82,9 @@ func (c *Conn) ReadText() (string, error) {
 		case opPong:
 			// ignore
 		case opClose:
+			if len(payload) >= 2 {
+				c.closeCode = binary.BigEndian.Uint16(payload[:2])
+			}
 			c.writeMu.Lock()
 			if !c.closeSent {
 				c.closeSent = true
@@ -147,6 +151,30 @@ func (c *Conn) Close() error {
 	})
 	return c.closeErr
 }
+
+// CloseWithCode sends a close frame carrying an application status code +
+// reason (RFC 6455 §5.5.1), then closes the socket. Used for auth rejections
+// (AuthCloseCode = 4401). Idempotent, like Close.
+func (c *Conn) CloseWithCode(code uint16, reason string) error {
+	c.closeOnce.Do(func() {
+		c.writeMu.Lock()
+		if !c.closeSent {
+			c.closeSent = true
+			payload := make([]byte, 2, 2+len(reason))
+			binary.BigEndian.PutUint16(payload, code)
+			payload = append(payload, reason...)
+			_ = c.netConn.SetWriteDeadline(time.Now().Add(time.Second))
+			_ = writeRawFrame(c.netConn, opClose, payload, c.client)
+		}
+		c.writeMu.Unlock()
+		c.closeErr = c.netConn.Close()
+	})
+	return c.closeErr
+}
+
+// CloseCode returns the status code from the peer's close frame (0 if none was
+// received). Populated once ReadText observes a close.
+func (c *Conn) CloseCode() uint16 { return c.closeCode }
 
 func (c *Conn) writeFrame(op byte, payload []byte) error {
 	c.writeMu.Lock()
@@ -242,6 +270,12 @@ func (c *Conn) readFrame() (fin bool, op byte, payload []byte, err error) {
 //	conn.WriteText(`{"type":"text","data":{"text":"hello"}}`)
 //	frame, _ := conn.ReadText()
 func Dial(rawURL string) (*Conn, error) {
+	return DialWithHeaders(rawURL, nil)
+}
+
+// DialWithHeaders is Dial with extra request headers — used to exercise
+// header-carried credentials (Authorization / Cookie, PROTOCOL.md §2.1).
+func DialWithHeaders(rawURL string, headers map[string]string) (*Conn, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, err
@@ -277,7 +311,11 @@ func Dial(rawURL string) (*Conn, error) {
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +
 		"Sec-WebSocket-Key: " + key + "\r\n" +
-		"Sec-WebSocket-Version: 13\r\n\r\n"
+		"Sec-WebSocket-Version: 13\r\n"
+	for name, value := range headers {
+		request += name + ": " + value + "\r\n"
+	}
+	request += "\r\n"
 	if _, err := netConn.Write([]byte(request)); err != nil {
 		netConn.Close()
 		return nil, err

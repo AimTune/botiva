@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Botiva.Authentication</RootNamespace>
+    <Description>botiva authentication adapters — static-token, HMAC-JWT and cookie IAuthenticator implementations for the Botiva auth port (BCL only).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\dotnet\Botiva.csproj" />
+  </ItemGroup>
+
+</Project>

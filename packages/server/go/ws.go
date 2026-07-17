@@ -23,6 +23,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -80,8 +81,15 @@ func (h *handler) serve(conn *Conn, r *http.Request) error {
 	ctx := context.Background()
 
 	q := r.URL.Query()
+	headers := flattenHeaders(r.Header)
 	userID := q.Get("userId")
 	conversationID := q.Get("conversationId")
+	// Auth credential (§2.1): ?token=, then Authorization: Bearer; a hello frame
+	// may still add one below.
+	token := q.Get("token")
+	if token == "" {
+		token = bearer(headers)
+	}
 	watermark := 0
 	hasWatermark := false
 	if v := q.Get("watermark"); v != "" {
@@ -108,6 +116,9 @@ func (h *handler) serve(conn *Conn, r *http.Request) error {
 				if hello.HasWatermark {
 					watermark = hello.Watermark
 				}
+				if hello.Token != "" {
+					token = hello.Token
+				}
 			} else {
 				buffered = text // first frame was a normal message → handle after connect
 			}
@@ -119,6 +130,12 @@ func (h *handler) serve(conn *Conn, r *http.Request) error {
 		ConversationID: conversationID,
 		Watermark:      watermark,
 		Meta:           meta,
+		Auth: &botiva.AuthInput{
+			Transport: "websocket",
+			Token:     token,
+			Query:     flattenQuery(q),
+			Headers:   headers,
+		},
 		Deliver: func(frame botiva.Frame) {
 			raw, err := json.Marshal(frame)
 			if err != nil {
@@ -131,6 +148,14 @@ func (h *handler) serve(conn *Conn, r *http.Request) error {
 		},
 	})
 	if err != nil {
+		var authErr *botiva.AuthenticationError
+		if errors.As(err, &authErr) {
+			if raw, marshalErr := json.Marshal(botiva.ErrorFrame(authErr.Code, authErr.Reason)); marshalErr == nil {
+				_ = conn.WriteText(string(raw))
+			}
+			_ = conn.CloseWithCode(botiva.AuthCloseCode, authErr.Reason)
+			return nil
+		}
 		return err
 	}
 	defer connection.Close(ctx)
@@ -192,6 +217,39 @@ func Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error) {
 func acceptKey(key string) string {
 	h := sha1.Sum([]byte(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
 	return base64.StdEncoding.EncodeToString(h[:])
+}
+
+// flattenHeaders turns http.Header into a flat lower-cased map (multi-values
+// joined), the shape botiva.AuthContext.Headers expects.
+func flattenHeaders(h http.Header) map[string]string {
+	out := make(map[string]string, len(h))
+	for name, values := range h {
+		out[strings.ToLower(name)] = strings.Join(values, ", ")
+	}
+	return out
+}
+
+func flattenQuery(q map[string][]string) map[string]string {
+	out := make(map[string]string, len(q))
+	for name, values := range q {
+		if len(values) > 0 {
+			out[name] = values[0]
+		}
+	}
+	return out
+}
+
+// bearer pulls a token out of an `Authorization: Bearer …` header.
+func bearer(headers map[string]string) string {
+	auth := headers["authorization"]
+	if auth == "" {
+		return ""
+	}
+	const prefix = "bearer "
+	if len(auth) > len(prefix) && strings.EqualFold(auth[:len(prefix)], prefix) {
+		return strings.TrimSpace(auth[len(prefix):])
+	}
+	return ""
 }
 
 func headerContainsToken(h http.Header, name, token string) bool {

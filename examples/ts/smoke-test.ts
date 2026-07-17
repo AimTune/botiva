@@ -19,6 +19,8 @@ import { io as ioClient } from "socket.io-client";
 import { ConversationEngine, DemoRuntime, type Frame } from "@botiva/core";
 import { WebSocketConnector } from "@botiva/websocket";
 import { SocketIOConnector } from "@botiva/socket.io";
+import { CookieAuthenticator, HmacJwtAuthenticator } from "@botiva/authentication";
+import { createHmac } from "node:crypto";
 
 const port = Number(process.env.PORT ?? 8795);
 
@@ -215,6 +217,77 @@ try {
     B.close();
     D.close();
     socket.close();
+
+    // ── 10. authentication port (separate engine + server) ──────────────────
+    const jwtSecret = "smoke-secret";
+    const makeJwt = (sub: string, extra: Record<string, unknown> = {}) => {
+        const enc = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
+        const head = enc({ alg: "HS256", typ: "JWT" });
+        const body = enc({ sub, ...extra });
+        const sig = createHmac("sha256", jwtSecret).update(`${head}.${body}`).digest("base64url");
+        return `${head}.${body}.${sig}`;
+    };
+
+    const authEngine = new ConversationEngine({
+        runtime: new DemoRuntime(),
+        logger: { error: () => {} },
+        // Cookie "botiva_session" → JWT, with query/hello/Bearer token as fallback.
+        authenticator: new CookieAuthenticator({
+            cookie: "botiva_session",
+            inner: new HmacJwtAuthenticator({ secret: jwtSecret }),
+        }),
+    });
+    const authPort = port + 1;
+    const authServer = createServer();
+    new WebSocketConnector({ engine: authEngine, server: authServer, helloTimeoutMs: 100 });
+    await new Promise<void>((resolve) => authServer.listen(authPort, resolve));
+
+    // Raw WS helper capturing frames AND the close code.
+    const rawConnect = (query = "", headers?: Record<string, string>) => {
+        const ws = new WebSocket(`ws://localhost:${authPort}/chat${query}`, { headers });
+        const col = new FrameCollector();
+        const closed = new Promise<number>((resolve) => ws.on("close", (code) => resolve(code)));
+        ws.on("message", (raw) => col.push(JSON.parse(raw.toString())));
+        const opened = new Promise<void>((resolve, reject) => {
+            ws.on("open", () => resolve());
+            ws.on("error", () => reject(new Error("ws error")));
+        });
+        return { ws, col, closed, opened };
+    };
+
+    // (a) rejected: no credential → error frame + close 4401, no welcome
+    const bad = rawConnect();
+    await bad.opened;
+    const errFrame = await bad.col.waitFor((f) => f.type === "error", "auth error frame");
+    check("unauthenticated connect gets an error frame", errFrame.data?.code === "unauthorized");
+    const badCode = await bad.closed;
+    check("auth rejection closes with 4401", badCode === 4401);
+    check("no welcome frame for a rejected connection", !bad.col.frames.some((f) => f.type === "welcome"));
+
+    // (b) accepted via query token → verified userId from the JWT `sub`
+    const goodJwt = makeJwt("user-verified", { role: "admin" });
+    const good = rawConnect(`?token=${goodJwt}`);
+    await good.opened;
+    const welcomeAuth = await good.col.waitFor((f) => f.type === "welcome", "welcome (auth)");
+    check("valid token connects", !!welcomeAuth.data?.conversationId);
+    check("verified userId overrides client claim", welcomeAuth.data?.userId === "user-verified");
+
+    // (c) accepted via cookie (browser-style, no client token plumbing)
+    const cookie = rawConnect("", { Cookie: `botiva_session=${makeJwt("user-cookie")}` });
+    await cookie.opened;
+    const welcomeCookie = await cookie.col.waitFor((f) => f.type === "welcome", "welcome (cookie)");
+    check("cookie credential authenticates", welcomeCookie.data?.userId === "user-cookie");
+
+    // (d) a forged/invalid token is rejected even when userId is asserted
+    const forged = rawConnect(`?token=not-a-jwt&userId=user-spoof`);
+    await forged.opened;
+    await forged.col.waitFor((f) => f.type === "error", "forged token error");
+    const forgedCode = await forged.closed;
+    check("forged token cannot spoof identity", forgedCode === 4401 && !forged.col.frames.some((f) => f.type === "welcome"));
+
+    good.ws.close();
+    cookie.ws.close();
+    authServer.close();
 } catch (err) {
     check(`flow failed: ${(err as Error).message}`, false);
 }
