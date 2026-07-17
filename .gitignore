@@ -3,8 +3,10 @@ dist/
 *.tsbuildinfo
 
 # .NET
-ports/dotnet/**/bin/
-ports/dotnet/**/obj/
+packages/**/dotnet/bin/
+packages/**/dotnet/obj/
+examples/dotnet/**/bin/
+examples/dotnet/**/obj/
 
 # Python
 __pycache__/

@@ -1,0 +1,18 @@
+[project]
+name = "botiva-langgraph"
+version = "0.1.0"
+description = "botiva — LangGraph runtime adapter for the botiva Python port (astream_events v2, HITL interrupts)."
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["botiva", "chativa", "chatbot", "langgraph", "agent"]
+dependencies = ["botiva"]
+
+[project.optional-dependencies]
+langgraph = ["langgraph>=0.2"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["botiva_langgraph*"]

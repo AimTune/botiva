@@ -26,17 +26,19 @@ chativa widget ⇄ @chativa/connector-botiva ⇄ transport ⇄ ConversationEngin
   LangGraph).
 - **Ports & adapters.** `Runtime`, `StateStore`, `HistoryStore`, `Extension`
   are small language-agnostic ports. Go, .NET and Python reference ports live
-  in [`ports/`](ports/README.md) with the same signatures.
+  as language leaves next to each capability (`packages/<capability>/<lang>`,
+  see [docs/LANGUAGES.md](docs/LANGUAGES.md)) with the same signatures.
 
-## Packages (pnpm workspace)
+## Packages (capability-first; `ts` leaves form the pnpm workspace)
 
-| Package             | What                                                        |
+| Package (folder)    | What                                                        |
 |---------------------|-------------------------------------------------------------|
-| `@botiva/core`      | `ConversationEngine`, protocol, events, stores, extensions, `botivaEmit`, `DemoRuntime` |
-| `@botiva/websocket` | `WebSocketConnector` (`ws`) — coexists with Socket.IO on one HTTP server |
-| `@botiva/socket.io` | `SocketIOConnector` — all frames over one event channel (`"botiva"`) |
-| `@botiva/langgraph` | `LangGraphRuntime` — streamEvents v2, HITL interrupts, GenUI, tracing passthrough |
-| `@botiva/redis`     | `RedisStateStore` + `RedisHistoryStore` (bring your own ioredis/node-redis client) |
+| `@botiva/core` (`packages/core/ts`) | `ConversationEngine`, protocol, events, stores, extensions, `botivaEmit`, `DemoRuntime` |
+| `@botiva/authentication` (`packages/authentication/ts`) | `Authenticator` port + auth types — skeleton, engine integration tracked in [#1](https://github.com/AimTune/botiva/issues/1) |
+| `@botiva/websocket` (`packages/server/ts/websocket`) | `WebSocketConnector` (`ws`) — coexists with Socket.IO on one HTTP server |
+| `@botiva/socket.io` (`packages/server/ts/socketio`) | `SocketIOConnector` — all frames over one event channel (`"botiva"`) |
+| `@botiva/langgraph` (`packages/runtimes/ts`) | `LangGraphRuntime` — streamEvents v2, HITL interrupts, GenUI, tracing passthrough |
+| `@botiva/redis` (`packages/state/redis/ts`) | `RedisStateStore` + `RedisHistoryStore` (bring your own ioredis/node-redis client) |
 
 ## Quickstart
 
@@ -124,15 +126,15 @@ That's the whole contract. Shipped adapters:
 | Language   | Adapter                                | Framework                                                            |
 |------------|----------------------------------------|----------------------------------------------------------------------|
 | TypeScript | `@botiva/langgraph` `LangGraphRuntime` | LangGraph JS — `streamEvents` v2, `interrupt()`/`Command({resume})`   |
-| Python     | `botiva.langgraph.LangGraphRuntime`    | LangGraph Python — `astream_events` v2, `interrupt()`/`Command`       |
+| Python     | `botiva_langgraph.LangGraphRuntime`    | LangGraph Python — `astream_events` v2, `interrupt()`/`Command`       |
 | .NET       | `Botiva.Agents.ChatClientRuntime`      | Microsoft.Extensions.AI `IChatClient` (OpenAI/Azure/Ollama, Semantic Kernel via `AsChatClient()`) + LangGraph-style `Hitl.Interrupt()` |
-| Go         | `adapters/langchaingo.Runtime`         | langchaingo `llms.Model` (any provider) + `Interrupt(ctx, …)` HITL    |
+| Go         | `runtimes/langchaingo.Runtime`         | langchaingo `llms.Model` (any provider) + `Interrupt(ctx, …)` HITL    |
 
 All four map to the same botiva events: tool calls → `tool_call` frames, a
 paused tool → `interrupt` + approval chips, the user's next message → resume,
 GenUI emits → `genui` streams. Writing one for another framework (Vercel AI
 SDK, hand-written loops, …) is the same ~100 lines — see
-`packages/core/src/demo.ts` for the reference implementation.
+`packages/core/ts/src/demo.ts` for the reference implementation.
 
 ## Extensions — telemetry, tracing, customization
 
@@ -185,12 +187,12 @@ And in the other languages (no API key needed — every server speaks the same
 protocol and has a scripted `--selftest`, exit 0/1):
 
 ```sh
-cd ports/go     && go run ./examples/server                    # :8793 — Go engine + stdlib ws
-cd ports/dotnet && dotnet run --project Botiva.Example         # :8797 — IChatClient agent loop + MCP
+go run ./examples/go/server                                    # :8793 — Go engine + stdlib ws
+dotnet run --project examples/dotnet/Botiva.Example            # :8797 — IChatClient agent loop + MCP
                                                                #   tools at /mcp (ModelContextProtocol);
                                                                #   -- --claude → real Claude (Anthropic SDK)
-cd ports/python && python examples/server.py                   # :8795 — Python engine + asyncio ws
-cd ports/python && python examples/langgraph_server.py         # :8796 — real LangGraph interrupt/resume
+python examples/python/server.py                               # :8795 — Python engine + asyncio ws
+python examples/python/langgraph_server.py                     # :8796 — real LangGraph interrupt/resume
                                                                #         (pip install langgraph)
 ```
 
@@ -216,13 +218,14 @@ The wire format, frame catalog, turn lifecycle and canonical port signatures
 for TypeScript / Python / C# / Go are specified in
 [PROTOCOL.md](PROTOCOL.md). Working reference ports — engine + WebSocket
 transport + agent-framework adapter + runnable example, each with self-tests —
-live in [ports/](ports/README.md):
+live as language leaves under `packages/` (see
+[docs/LANGUAGES.md](docs/LANGUAGES.md)):
 
 | Port | Transport | Agent adapter | Example |
 |---|---|---|---|
-| [ports/go](ports/go/README.md) | `botiva/ws` (stdlib RFC 6455) | `adapters/langchaingo` | `examples/server` :8793 |
-| [ports/dotnet](ports/dotnet/README.md) | `Botiva.AspNetCore` (`app.MapBotiva`) | `Botiva.Agents` (IChatClient) | `Botiva.Example` :8797 |
-| [ports/python](ports/python/README.md) | `botiva.ws` (stdlib asyncio) | `botiva.langgraph` | `examples/*.py` :8795/:8796 |
+| [Go](packages/core/go/README.md) | `packages/server/go` (stdlib RFC 6455) | `packages/runtimes/go` (langchaingo) | `examples/go/server` :8793 |
+| [.NET](packages/core/dotnet/README.md) | `Botiva.AspNetCore` (`app.MapBotiva`) | `Botiva.Agents` (IChatClient) | `examples/dotnet/Botiva.Example` :8797 |
+| [Python](packages/core/python/README.md) | `botiva_ws` (stdlib asyncio) | `botiva_langgraph` | `examples/python/*.py` :8795/:8796 |
 
 ## Roadmap
 

@@ -1,0 +1,15 @@
+[project]
+name = "botiva-ws"
+version = "0.1.0"
+description = "botiva — stdlib asyncio WebSocket transport for the botiva Python port (Botiva Wire Protocol v1)."
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["botiva", "chativa", "chatbot", "websocket", "transport"]
+dependencies = ["botiva"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["botiva_ws*"]

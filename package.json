@@ -6,10 +6,10 @@
     "scripts": {
         "build": "tsc -b",
         "clean": "tsc -b --clean",
-        "smoke": "pnpm build && tsx examples/smoke-test.ts",
-        "demo": "pnpm build && tsx examples/demo-server.ts",
-        "demo:graph": "pnpm build && tsx examples/langgraph-server.ts",
-        "demo:mcp": "pnpm build && tsx examples/mcp-demo-server.ts"
+        "smoke": "pnpm build && tsx examples/ts/smoke-test.ts",
+        "demo": "pnpm build && tsx examples/ts/demo-server.ts",
+        "demo:graph": "pnpm build && tsx examples/ts/langgraph-server.ts",
+        "demo:mcp": "pnpm build && tsx examples/ts/mcp-demo-server.ts"
     },
     "devDependencies": {
         "@types/node": "^22.10.0",

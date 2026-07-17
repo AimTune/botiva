@@ -1,10 +1,11 @@
 {
     "files": [],
     "references": [
-        { "path": "packages/core" },
-        { "path": "packages/websocket" },
-        { "path": "packages/socketio" },
-        { "path": "packages/langgraph" },
-        { "path": "packages/redis" }
+        { "path": "packages/core/ts" },
+        { "path": "packages/authentication/ts" },
+        { "path": "packages/server/ts/websocket" },
+        { "path": "packages/server/ts/socketio" },
+        { "path": "packages/runtimes/ts" },
+        { "path": "packages/state/redis/ts" }
     ]
 }

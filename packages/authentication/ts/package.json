@@ -1,0 +1,23 @@
+{
+    "name": "@botiva/authentication",
+    "version": "0.1.0",
+    "description": "botiva authentication port — Authenticator interface and shared auth types (skeleton).",
+    "license": "MIT",
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "default": "./dist/index.js"
+        }
+    },
+    "files": ["dist"],
+    "sideEffects": false,
+    "publishConfig": {
+        "access": "public"
+    },
+    "engines": {
+        "node": ">=18.17"
+    }
+}

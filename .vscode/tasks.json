@@ -9,9 +9,9 @@
             "problemMatcher": "$tsc"
         },
         {
-            "label": "dotnet build (ports)",
+            "label": "dotnet build (selftest)",
             "type": "shell",
-            "command": "dotnet build ports/dotnet/Botiva.SelfTest",
+            "command": "dotnet build examples/dotnet/Botiva.SelfTest",
             "problemMatcher": "$msCompile"
         }
     ]

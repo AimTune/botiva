@@ -1,0 +1,20 @@
+<Solution>
+  <Folder Name="/examples/" />
+  <Folder Name="/examples/dotnet/">
+    <Project Path="examples/dotnet/Botiva.Example/Botiva.Example.csproj" />
+    <Project Path="examples/dotnet/Botiva.SelfTest/Botiva.SelfTest.csproj" />
+  </Folder>
+  <Folder Name="/packages/" />
+  <Folder Name="/packages/core/" />
+  <Folder Name="/packages/core/dotnet/">
+    <Project Path="packages/core/dotnet/Botiva.csproj" />
+  </Folder>
+  <Folder Name="/packages/runtimes/" />
+  <Folder Name="/packages/runtimes/dotnet/">
+    <Project Path="packages/runtimes/dotnet/Botiva.Agents.csproj" />
+  </Folder>
+  <Folder Name="/packages/server/" />
+  <Folder Name="/packages/server/dotnet/">
+    <Project Path="packages/server/dotnet/Botiva.AspNetCore.csproj" />
+  </Folder>
+</Solution>

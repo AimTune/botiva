@@ -1,6 +1,8 @@
 packages:
-  - "packages/*"
-  - "examples"
+  - "packages/*/ts"
+  - "packages/*/ts/*"
+  - "packages/*/*/ts"
+  - "examples/ts"
 allowBuilds:
   esbuild: true
 minimumReleaseAgeExclude:
